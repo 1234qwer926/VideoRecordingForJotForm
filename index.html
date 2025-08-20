@@ -10,19 +10,16 @@
       padding: 20px;
       background: #f9f9f9;
     }
-
     h2 {
       color: #333;
       margin-bottom: 15px;
     }
-
     video {
       border-radius: 12px;
       border: 2px solid #ccc;
       margin-bottom: 15px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.1);
     }
-
     .btn {
       padding: 10px 20px;
       margin: 5px;
@@ -32,77 +29,97 @@
       cursor: pointer;
       transition: all 0.3s ease;
     }
-
     .btn-start {
       background-color: #4CAF50;
       color: white;
     }
-
     .btn-start:hover {
       background-color: #45a049;
     }
-
     .btn-stop {
       background-color: #e74c3c;
       color: white;
     }
-
     .btn-stop:hover {
       background-color: #c0392b;
     }
-
     .btn:disabled {
       background-color: #ddd;
       cursor: not-allowed;
     }
-
-    a {
-      display: inline-block;
+    #status {
       margin-top: 15px;
-      padding: 10px 18px;
-      background-color: #3498db;
-      color: white;
-      text-decoration: none;
-      border-radius: 8px;
-      font-size: 16px;
-      transition: background 0.3s ease;
-    }
-
-    a:hover {
-      background-color: #2980b9;
+      font-size: 14px;
+      color: #555;
     }
   </style>
 </head>
 <body>
   <h2>🎥 Record Your Answer</h2>
+  
+  <!-- Video preview -->
   <video id="preview" autoplay muted height="240" width="320"></video>
   <br/>
+  
+  <!-- Buttons -->
   <button id="startBtn" class="btn btn-start">Start Recording</button>
   <button id="stopBtn" class="btn btn-stop" disabled>Stop Recording</button>
-  <br/>
-  <a id="downloadLink" style="display:none;">⬇️ Download Video</a>
+  
+  <p id="status"></p>
+  
+  <!-- Hidden email field (Jotform can pass user email as URL param) -->
+  <input type="hidden" id="userEmail" value="anonymous_user@example.com">
 
   <script>
     let mediaRecorder, recordedChunks = [];
     const preview = document.getElementById("preview");
     const startBtn = document.getElementById("startBtn");
     const stopBtn = document.getElementById("stopBtn");
-    const downloadLink = document.getElementById("downloadLink");
+    const statusText = document.getElementById("status");
 
     async function init() {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      preview.srcObject = stream;
-      mediaRecorder = new MediaRecorder(stream);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        preview.srcObject = stream;
+        mediaRecorder = new MediaRecorder(stream);
 
-      mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunks, { type: "video/webm" });
-        const url = URL.createObjectURL(blob);
-        downloadLink.href = url;
-        downloadLink.download = "recorded_video.webm";
-        downloadLink.style.display = "inline-block";
-        downloadLink.textContent = "⬇️ Download Video";
-      };
+        mediaRecorder.ondataavailable = (e) => recordedChunks.push(e.data);
+
+        mediaRecorder.onstop = async () => {
+          const blob = new Blob(recordedChunks, { type: "video/webm" });
+
+          // Show uploading status
+          statusText.textContent = "⏳ Uploading video to Google Drive...";
+
+          // Prepare FormData
+          const formData = new FormData();
+          formData.append("file", blob, "recorded_video.webm");
+          formData.append("email", document.getElementById("userEmail").value);
+
+          try {
+            const res = await fetch("https://script.google.com/macros/s/AKfycby-zt66hIUBFAl6ZzggRPR93jY1oImD34HDTpZeq0QsR17p0aMOaLiacB4J6l4MfSOMlw/exec", {
+              method: "POST",
+              body: formData
+            });
+
+            const data = await res.json();
+            if (data.success) {
+              statusText.textContent = "✅ Uploaded! Video saved in Drive.";
+              console.log("Uploaded file URL:", data.fileUrl);
+
+              // Send video URL back to Jotform
+              window.parent.postMessage({ videoUrl: data.fileUrl }, "*");
+            } else {
+              statusText.textContent = "❌ Upload failed: " + data.error;
+            }
+          } catch (err) {
+            console.error("Upload error:", err);
+            statusText.textContent = "❌ Upload error. Check console.";
+          }
+        };
+      } catch (err) {
+        alert("Camera/Mic access denied: " + err.message);
+      }
     }
 
     startBtn.onclick = () => {
@@ -110,6 +127,7 @@
       mediaRecorder.start();
       startBtn.disabled = true;
       stopBtn.disabled = false;
+      statusText.textContent = "🔴 Recording...";
     };
 
     stopBtn.onclick = () => {
